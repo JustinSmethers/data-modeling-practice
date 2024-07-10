@@ -1,6 +1,7 @@
 import os
 import duckdb
 from faker import Faker
+from db_manager import DuckDBManager
 from schema_generator.schema_definition import load_schema
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta, date
@@ -8,60 +9,33 @@ from tqdm import tqdm
 
 fake = Faker()
 
-ALLOWED_CUSTOM_CONSTRAINTS = {'BETWEEN', 'AFTER', 'BEFORE'}
-ALLOWED_DATA_TYPES = {'INTEGER', 'FLOAT', 'VARCHAR', 'DATE'}
-
-def generate_fake_data(schema: Dict[str, Any], rows: int, db_path: str) -> duckdb.DuckDBPyConnection:
-    conn = create_db_connection(db_path)
-    validate_schema_data_types(schema) # Validate schema data types
-    create_tables_in_duckdb(schema, conn) # Create tables in DuckDB
-    
-    # Insert data into tables
-    insert_data_into_tables(schema, rows, conn)
-
-    # Apply custom constraints
-    # for table_name, table_def in schema.items():
-    #     for col_name, custom_constraint in table_def.get('custom_constraints', {}).items():
-    #         print(f'Applying custom constraint {custom_constraint}')
-    #         validate_custom_constraint(custom_constraint)
-    #         apply_custom_constraint(conn, table_name, col_name, custom_constraint)
-    
-    return conn
-
-def create_db_connection(db_path: str) -> duckdb.DuckDBPyConnection:
-    if os.path.exists(db_path): # Delete the existing database file
-        os.remove(db_path)
-        print(f"Existing database file '{db_path}' has been deleted.")
-    
-    conn = duckdb.connect(db_path) # Create a new database file by connecting to it
-    print(f"New database file '{db_path}' has been created.")
-
-    return conn
-
-def create_tables_in_duckdb(schema: Dict[str, Any], conn: duckdb.DuckDBPyConnection) -> None:
-    for table_name, table_def in schema.items():
-        columns = [f"{col_name} {col_type}" for col_name, col_type in table_def['columns'].items()]
-        ddl = f"CREATE OR REPLACE TABLE {table_name} (\n" + ",\n".join(columns) + "\n);"
-        conn.sql(ddl)    
-
-def insert_data_into_tables(schema: Dict[str, Any], rows: int, conn: duckdb.DuckDBPyConnection) -> None:
-    for table_name, table_def in schema.items():
+def insert_data_into_tables(schema: Dict[str, Any], rows: int, db: DuckDBManager) -> None:
+    for table_name, table_def in schema.items(): # Iterate over the tables listed in the schema
         print(f'Inserting data into {table_name}')
-        for iterator in tqdm(range(rows)):
-            # if iterator % 100 == 0:
-                # print(f'\tOn row {iterator} of {rows}')
+        
+        for iterator in tqdm(range(rows)): # Generate the data row by row
             row = {}
-            for col_name, col_def in table_def['columns'].items():
+            for col_name, col_def in table_def['columns'].items(): # Iterate over the columns in the row
                 col_type, col_constraints = parse_col_definition(col_def)
                 if 'PRIMARY KEY' in col_constraints.upper():
+                    # Generate the primary key as a numeric iterator equal to the number of rows
                     row[col_name] = iterator
-                elif 'REFERENCES' not in col_constraints.upper() and ('UNIQUE' in col_constraints.upper()) and 'PRIMARY KEY' not in col_constraints.upper():
-                    row[col_name] = generate_unique_value(conn, table_name, col_name, col_type)
+                
+                elif 'REFERENCES' not in col_constraints.upper() \
+                     and 'UNIQUE' in col_constraints.upper() \
+                     and 'PRIMARY KEY' not in col_constraints.upper():    
+                    # Generate unique values for non-primary-key, non-foreign-key, unique fields
+                    row[col_name] = generate_unique_value(db, table_name, col_name, col_type)
+
                 elif 'REFERENCES' not in col_constraints.upper():
+                    # Generate generic fake values for non-id, non-unique fields
                     row[col_name] = generate_fake_value(col_type)  # Extract the base type
+
                 else:
-                    row[col_name] = fake.pyint(min_value=0, max_value=rows-1) # Set the foreign key to a random int in the range of the primary keys
-            insert_row(conn, table_name, row) 
+                    # Generate foreign keys as a random int in the range of the primary keys (since PKs are sequential, bounded ints)
+                    row[col_name] = fake.pyint(min_value=0, max_value=rows-1)
+            
+            db.insert_row(table_name, row) # Insert the fully constructed row into the database
         print('\tDone inserting data')
 
 def parse_col_definition(col_def: str) -> list:
@@ -72,13 +46,6 @@ def parse_col_definition(col_def: str) -> list:
     constraints = ' '.join(col_def[1:])
 
     return col_type, constraints
-
-def parse_foreign_key(col_def: str) -> (str, str):
-    reference_part = col_def.split(' ')[2]
-    references_list = reference_part.replace('(', ' ').replace(')', '').split(' ')
-    referenced_table = references_list[0]
-    referenced_column = references_list[1]
-    return referenced_table, referenced_column
 
 def generate_fake_value(data_type: str, date_between_start: Optional[datetime.date]=None, date_between_end: Optional[datetime.date]=None) -> Any:
     if data_type == 'INTEGER':
@@ -99,33 +66,12 @@ def generate_fake_value(data_type: str, date_between_start: Optional[datetime.da
     else:
         return ValueError(f"Unsupported data type '{data_type}'")
 
-def generate_unique_value(conn: duckdb.DuckDBPyConnection, table_name: str, col_name: str, data_type: str) -> Any:
+def generate_unique_value(db: DuckDBManager, table_name: str, col_name: str, data_type: str) -> Any:
+    value = generate_fake_value(data_type)
     while True:
-        value = generate_fake_value(data_type) + generate_fake_value(data_type)
-        conn.execute('CREATE TABLE IF NOT EXISTS unique_values (table_name VARCHAR, column_name VARCHAR, value VARCHAR)')
-        result = conn.execute("SELECT 1 FROM unique_values WHERE table_name = ? AND column_name = ? AND value = ?", (table_name, col_name, str(value))).fetchone()
-        if result is None:
-            conn.execute("INSERT INTO unique_values (table_name, column_name, value) VALUES (?, ?, ?)", (table_name, col_name, str(value)))
+        if db.is_unique_value(table_name, col_name, value):
             return value
-
-def validate_custom_constraint(custom_constraint: str) -> None:
-    for keyword in ALLOWED_CUSTOM_CONSTRAINTS:
-        if keyword in custom_constraint:
-            return
-    raise ValueError(f"Unsupported custom constraint: {custom_constraint}")
-
-def validate_schema_data_types(schema: Dict[str, Any]) -> None:
-    for table_name, table_def in schema.items():
-        for col_name, col_type in table_def['columns'].items():
-            base_type = col_type.split()[0]
-            if base_type not in ALLOWED_DATA_TYPES:
-                raise ValueError(f"Unsupported data type '{base_type}' for column '{col_name}' in table '{table_name}'")
-
-def insert_row(conn: duckdb.DuckDBPyConnection, table_name: str, row: Dict[str, Any]) -> None:
-    columns = ', '.join(row.keys())
-    placeholders = ', '.join(['?'] * len(row))
-    values = tuple(row.values())
-    conn.execute(f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})", values)
+        value += generate_fake_value(data_type)
 
 def apply_custom_constraint(conn: duckdb.DuckDBPyConnection, table_name: str, col_name: str, custom_constraint: str) -> None:
     if 'BETWEEN' in custom_constraint:
@@ -160,6 +106,12 @@ def apply_custom_constraint(conn: duckdb.DuckDBPyConnection, table_name: str, co
         """
         conn.execute(query)
 
-def generate_data(schema_file: str, rows: int, db_path: str) -> duckdb.DuckDBPyConnection:
-    schema = load_schema(schema_file)
-    return generate_fake_data(schema, rows, db_path)
+def generate_data(schema: Dict[str, Any], rows: int, db: DuckDBManager) -> None:
+    insert_data_into_tables(schema, rows, db)
+
+        # Apply custom constraints
+    # for table_name, table_def in schema.items():
+    #     for col_name, custom_constraint in table_def.get('custom_constraints', {}).items():
+    #         print(f'Applying custom constraint {custom_constraint}')
+    #         validate_custom_constraint(custom_constraint)
+    #         apply_custom_constraint(conn, table_name, col_name, custom_constraint)

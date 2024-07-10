@@ -1,9 +1,12 @@
-from schema_generator.schema_definition import load_schema, generate_ddl
+from schema_generator.schema_definition import load_schema, load_ddl
+from typing import Dict, Any
 
-def generate_schema(file_path: str) -> str:
+def generate_ddl(file_path: str) -> str:
     schema = load_schema(file_path)
-    ddl = generate_ddl(schema)
-    return ddl
+    return load_ddl(schema)
+
+def generate_schema(file_path: str) -> Dict[str, Any]:
+    return load_schema(file_path)
 
 if __name__ == "__main__":
     import sys

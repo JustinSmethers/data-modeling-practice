@@ -1,1 +1,1 @@
-from .ddl_generator import generate_schema
+from .ddl_generator import generate_schema, generate_ddl
