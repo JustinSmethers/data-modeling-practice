@@ -1,0 +1,30 @@
+customers:
+  columns:
+    id: INTEGER PRIMARY KEY
+    name: VARCHAR
+    email: VARCHAR UNIQUE
+    created_at: DATE
+
+products:
+  columns:
+    id: INTEGER PRIMARY KEY
+    name: VARCHAR
+    category: VARCHAR
+    price: FLOAT
+
+orders:
+  columns:
+    id: INTEGER PRIMARY KEY
+    customer_id: INTEGER REFERENCES customers(id)
+    order_date: DATE
+    total_amount: FLOAT
+  custom_constraints:
+    order_date: "AFTER customers.created_at"
+
+order_items:
+  columns:
+    id: INTEGER PRIMARY KEY
+    order_id: INTEGER REFERENCES orders(id)
+    product_id: INTEGER REFERENCES products(id)
+    quantity: INTEGER
+    price: FLOAT

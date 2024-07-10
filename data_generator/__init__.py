@@ -1,0 +1,1 @@
+from .fake_data_generator import generate_data

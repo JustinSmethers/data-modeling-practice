@@ -1,0 +1,7 @@
+data_modeling_practice:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: '../data_modeling_practice.db'
+      schema: analytics

@@ -1,0 +1,1 @@
+from .ddl_generator import generate_schema

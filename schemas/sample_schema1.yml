@@ -1,0 +1,28 @@
+customers:
+  columns:
+    id: INTEGER
+    name: VARCHAR
+    email: VARCHAR
+    created_at: DATE
+
+orders:
+  columns:
+    id: INTEGER
+    customer_id: INTEGER
+    order_date: DATE
+    total_amount: FLOAT
+
+order_items:
+  columns:
+    id: INTEGER
+    order_id: INTEGER
+    product_id: INTEGER
+    quantity: INTEGER
+    price: FLOAT
+
+products:
+  columns:
+    id: INTEGER
+    name: VARCHAR
+    category: VARCHAR
+    price: FLOAT
