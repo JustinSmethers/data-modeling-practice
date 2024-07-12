@@ -1,0 +1,7 @@
+dbt_module:
+  outputs:
+    dev:
+      type: duckdb
+      path: '../data-modeling-practice.db'
+      schema: analytics
+  target: dev
